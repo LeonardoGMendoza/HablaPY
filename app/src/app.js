@@ -456,6 +456,22 @@ function ouvir() {
   catch (er) { $('#dicaVoz').textContent = t().naoEntendi; }
 }
 
+// No iPhone, enquanto o microfone ainda está aberto, o som sai pelo alto-falante de ligação (baixinho ou mudo).
+// Por isso só respondemos DEPOIS que o reconhecimento terminou de verdade (evento "end") e o som voltou para mídia.
+let pendente = null, timerPendente = null;
+function responderQuandoMicFechar(texto) {
+  pendente = texto;
+  clearTimeout(timerPendente);
+  timerPendente = setTimeout(soltarPendente, 1200);   // garantia, caso o "end" não chegue
+}
+function soltarPendente() {
+  clearTimeout(timerPendente);
+  if (pendente == null) return;
+  const f = pendente; pendente = null;
+  modoSom('playback');
+  setTimeout(() => voceDisse(f), ehIOS ? 350 : 0);
+}
+
 if (SR) {
   rec = new SR(); rec.interimResults = true; rec.continuous = false;
   rec.onresult = (e) => {
@@ -463,10 +479,16 @@ if (SR) {
     for (const r of e.results) { txt += r[0].transcript; if (r.isFinal) final = true; }
     ouvido = txt;
     $('#balao').hidden = false; $('#balao').textContent = '🎤 ' + txt;
-    if (final) { ouvindo = false; try { rec.abort(); } catch (er) {} modoSom('playback'); const fala = ouvido; ouvido = ''; voceDisse(fala); }
+    if (final) { ouvindo = false; const fala = ouvido; ouvido = ''; responderQuandoMicFechar(fala); try { rec.abort(); } catch (er) { soltarPendente(); } }
   };
-  rec.onerror = (e) => { modoSom('playback'); ouvindo = false; ouvido = ''; estadoMic('pronto'); if (e.error === 'not-allowed') $('#dicaVoz').textContent = t().micBloqueado; };
-  rec.onend = () => { modoSom('playback'); if (!ouvindo) return; ouvindo = false; if (ouvido) { const f = ouvido; ouvido = ''; voceDisse(f); } else { repetindo = -1; estadoMic('pronto'); } };
+  rec.onerror = (e) => { modoSom('playback'); ouvindo = false; ouvido = ''; if (pendente == null) estadoMic('pronto'); if (e.error === 'not-allowed') $('#dicaVoz').textContent = t().micBloqueado; };
+  rec.onend = () => {
+    modoSom('playback');
+    if (pendente != null) return soltarPendente();
+    if (!ouvindo) return;
+    ouvindo = false;
+    if (ouvido) { const f = ouvido; ouvido = ''; pendente = f; soltarPendente(); } else { repetindo = -1; estadoMic('pronto'); }
+  };
 }
 $('#mic').onclick = (e) => {
   e.stopPropagation();

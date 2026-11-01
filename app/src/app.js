@@ -283,7 +283,15 @@ async function abrirVip() {
 }
 
 // ---------- conversa com a IA ----------
+let esperandoIA = false;
 async function mandarParaIA(texto) {
+  if (esperandoIA) return;   // uma pergunta por vez: evita respostas em cima de respostas
+  esperandoIA = true;
+  let fala = null;
+  try { fala = await perguntarIA(texto); } finally { esperandoIA = false; }
+  if (fala) return falar(fala);   // fala depois de liberar: dá para perguntar de novo enquanto ela fala
+}
+async function perguntarIA(texto) {
   chat.push({ quem: 'eu', texto });
   render();
   estadoMic('pensando');
@@ -291,18 +299,18 @@ async function mandarParaIA(texto) {
   estadoMic('pronto');
   if (r.limite) {
     const fala = { es: '¡Llegaste al límite de hoy!', apoio: t().limite };
-    chat.push({ quem: 'ia', ...fala }); render(); return falar(fala);
+    chat.push({ quem: 'ia', ...fala }); render(); return fala;
   }
   if (!r.resposta) {
     const local = respostaRapida(texto, perfil, idioma) || { es: 'Perdón, no te escuché bien.', apoio: t().semServidor };
-    chat.push({ quem: 'ia', ...local }); render(); return falar(local);
+    chat.push({ quem: 'ia', ...local }); render(); return local;
   }
   if (r.vip !== undefined && r.vip !== vip.vip) { vip.vip = r.vip; gravar('hp.vip', vip); }
   chat.push({ quem: 'ia', es: r.resposta, apoio: idioma === 'es' ? '' : r.traducao, correcao: r.correcao });
   render();
   professor && professor.humor(r.humor || 'neutro');
   // fala a resposta em espanhol e, se houver, a correção no idioma do aluno
-  return falar({ es: r.resposta, apoio: r.correcao || '' });
+  return { es: r.resposta, apoio: r.correcao || '' };
 }
 
 // ---------- eventos ----------
@@ -428,10 +436,14 @@ function estadoMic(e) {
   $('#dicaVoz').textContent = e === 'ouvindo' ? (repetindo >= 0 ? t().repita : t().ouvindo) : e === 'pensando' ? t().pensando : (cumprimentou ? t().falar : t().comecar);
 }
 
+// O Safari do iPhone às vezes entrega o mesmo resultado 2 ou 3 vezes: só aceitamos UMA fala por vez de microfone
+let ultimaFala = '', ultimaFalaEm = 0;
 async function voceDisse(texto) {
   texto = (texto || '').trim();
   estadoMic('pronto');
   if (!texto) return;
+  if (texto === ultimaFala && Date.now() - ultimaFalaEm < 4000) return;
+  ultimaFala = texto; ultimaFalaEm = Date.now();
   if (repetindo >= 0 && licao) {   // modo pronúncia
     const i = repetindo; repetindo = -1;
     const { nota, faltando } = notaPronuncia(licao.frases[i].es, texto);
@@ -452,7 +464,7 @@ async function voceDisse(texto) {
 
 function ouvir() {
   if (!rec) { $('#balao').hidden = false; $('#balao').textContent = t().semMic; return; }
-  try { modoSom('play-and-record'); rec.lang = 'es-PY'; ouvido = ''; rec.start(); ouvindo = true; estadoMic('ouvindo'); }
+  try { modoSom('play-and-record'); rec.lang = 'es-PY'; ouvido = ''; pendente = null; rec.start(); ouvindo = true; estadoMic('ouvindo'); }
   catch (er) { $('#dicaVoz').textContent = t().naoEntendi; }
 }
 
@@ -475,6 +487,7 @@ function soltarPendente() {
 if (SR) {
   rec = new SR(); rec.interimResults = true; rec.continuous = false;
   rec.onresult = (e) => {
+    if (!ouvindo) return;   // resultado atrasado/repetido depois que já paramos de ouvir: ignora
     let txt = '', final = false;
     for (const r of e.results) { txt += r[0].transcript; if (r.isFinal) final = true; }
     ouvido = txt;

@@ -224,7 +224,7 @@ export const LICOES = [
     cena: { pt: 'Você é estudante no estágio e vai fazer a anamnese de um paciente com dor abdominal. Fale de "usted".', inicio: 'Buen día, doctor. Me duele mucho la panza desde anoche.' }
   },
   {
-    id: 'guarani', icone: '🇵🇾', gratis: false, nivel: 'Extra',
+    id: 'guarani', icone: '🧉', gratis: false, nivel: 'Extra',
     titulo: { pt: 'Guarani básico do dia a dia', es: 'Guaraní básico' },
     intro: 'O Paraguai tem duas línguas oficiais: espanhol e guarani. Muita gente mistura as duas (o "jopara"). Saber umas palavras abre portas!',
     frases: [

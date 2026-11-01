@@ -51,6 +51,11 @@ class TestTutor(unittest.TestCase):
         livre = montar_prompt("Hola")
         self.assertIn("Conversa livre", livre)
 
+    def test_prompt_idioma_do_aluno(self):
+        self.assertIn("INGLÊS", montar_prompt("Hola", idioma="en"))
+        self.assertIn("PORTUGUÊS", montar_prompt("Hola", idioma="pt"))
+        self.assertIn("imersão", montar_prompt("Hola", idioma="es"))
+
     def test_responder_guarda_memoria(self):
         ia = IAFalsa(RESPOSTA)
         r = Tutor(ia, self.mem).responder("a1", "Estoy embarazado de hablar", nome="Leo")

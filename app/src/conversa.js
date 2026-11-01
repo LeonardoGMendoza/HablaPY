@@ -1,7 +1,8 @@
-// Memória do aluno no aparelho + frases da professora que não precisam da IA (boas-vindas, cumprimentos).
-// Cada fala tem a parte em espanhol (falada com voz espanhola) e a explicação em português.
+// Memória do aluno no aparelho + falas da professora que não precisam da IA (boas-vindas, cumprimentos).
+// Cada fala: { es } em espanhol (voz paraguaia) + { apoio } no idioma do aluno (pt/en/es).
 import { LICOES } from './conteudo/licoes.js';
 import { NOME_PROF } from './estilo.js';
+import { tx } from './i18n.js';
 
 const ler = (k, p) => { try { const v = localStorage.getItem(k); return v ? JSON.parse(v) : p; } catch (e) { return p; } };
 const gravar = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) {} };
@@ -21,34 +22,45 @@ export function registrarLicao(id) {
   gravar('hp.memoria', m);
 }
 
-const titulo = (id) => { const l = LICOES.find(x => x.id === id); return l ? l.titulo.pt : ''; };
+const titulo = (id, idioma) => { const l = LICOES.find(x => x.id === id); return l ? tx(l.titulo, idioma) : ''; };
 
-export function boasVindas(perfil) {
+export function boasVindas(perfil, idioma) {
   const m = memoria(), nome = perfil.nome ? ', ' + perfil.nome : '', eu = NOME_PROF[perfil.genero];
+  const prof = perfil.genero === 'mulher' ? 'profesora' : 'profesor';
   if (m.visitas > 1 && m.ultimaLicao) {
+    const t = titulo(m.ultimaLicao, idioma);
     return {
       es: `¡Hola${nome}! ¡Qué bueno verte otra vez!`,
-      pt: `Da última vez a gente estudou "${titulo(m.ultimaLicao)}". Vamos continuar ou praticar conversação?`
+      apoio: {
+        pt: `Da última vez a gente estudou "${t}". Vamos continuar ou praticar conversação?`,
+        en: `Last time we studied "${t}". Shall we continue or practice conversation?`,
+        es: `La última vez estudiamos "${t}". ¿Seguimos o practicamos conversación?`
+      }[idioma]
     };
   }
   return {
-    es: `¡Hola${nome}! Soy ${eu}, tu ${perfil.genero === 'mulher' ? 'profesora' : 'profesor'} de español.`,
-    pt: 'Vou te preparar para a vida no Paraguai. Escolha uma lição ou toque no microfone e fale comigo, em espanhol ou em português.'
+    es: `¡Hola${nome}! Soy ${eu}, tu ${prof} de español.`,
+    apoio: {
+      pt: 'Vou te preparar para a vida no Paraguai. Escolha uma lição ou toque no microfone e fale comigo.',
+      en: "I'll get you ready for life in Paraguay. Pick a lesson or tap the microphone and talk to me.",
+      es: 'Te voy a preparar para vivir en Paraguay. Elegí una lección o tocá el micrófono y hablá conmigo.'
+    }[idioma]
   };
 }
 
 const norm = (s) => s.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[¿¡!?.,;:]/g, ' ').replace(/\s+/g, ' ').trim();
 
-// Respostas rápidas sem servidor. Devolve null quando é para a IA responder.
-export function respostaRapida(texto, perfil) {
+// Respostas rápidas quando o servidor não responde. Devolve null quando não sabe.
+export function respostaRapida(texto, perfil, idioma) {
   const n = norm(texto), nome = perfil.nome ? ', ' + perfil.nome : '';
-  if (/^(hola|oi|ola|buenas|buenos dias|buenas tardes|buenas noches|bom dia|boa tarde|boa noite)\b/.test(n) && n.split(' ').length <= 4) {
-    return { es: `¡Hola${nome}! ¿Cómo estás?`, pt: 'Responda em espanhol: "Estoy bien, gracias. ¿Y vos?"' };
+  const A = (pt, en, es) => ({ pt, en, es }[idioma]);
+  if (/^(hola|oi|ola|hello|hi|buenas|buenos dias|buenas tardes|buenas noches|bom dia|boa tarde|boa noite)\b/.test(n) && n.split(' ').length <= 4) {
+    return { es: `¡Hola${nome}! ¿Cómo estás?`, apoio: A('Responda em espanhol: "Estoy bien, gracias. ¿Y vos?"', 'Answer in Spanish: "Estoy bien, gracias. ¿Y vos?"', 'Respondé: "Estoy bien, gracias. ¿Y vos?"') };
   }
   if (/^(estoy bien|bien|muy bien|todo bien)\b/.test(n) && n.split(' ').length <= 6) {
-    return { es: '¡Qué bueno! ¿Qué querés practicar hoy?', pt: 'Pode escolher uma lição ou continuar conversando.' };
+    return { es: '¡Qué bueno! ¿Qué querés practicar hoy?', apoio: A('Pode escolher uma lição ou continuar conversando.', 'Pick a lesson or keep talking.', 'Elegí una lección o seguimos charlando.') };
   }
-  if (/(gracias|obrigad|aguyje)/.test(n)) return { es: '¡De nada! Para eso estoy.', pt: '' };
-  if (/(chau|adios|hasta luego|tchau|ate logo)/.test(n)) return { es: `¡Chau${nome}! ¡Nos vemos!`, pt: 'Bons estudos!' };
+  if (/(gracias|obrigad|thank|aguyje)/.test(n)) return { es: '¡De nada! Para eso estoy.', apoio: '' };
+  if (/(chau|adios|hasta luego|tchau|ate logo|bye)/.test(n)) return { es: `¡Chau${nome}! ¡Nos vemos!`, apoio: '' };
   return null;
 }

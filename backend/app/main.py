@@ -73,6 +73,7 @@ class Pergunta(BaseModel):
     objetivo: str = Field("", max_length=20)
     licao: str = Field("", max_length=30)
     cena: str = Field("", max_length=300)
+    idioma: str = Field("pt", max_length=5)
 
 
 class TextoVoz(BaseModel):
@@ -94,9 +95,10 @@ class Aula(BaseModel):
     descricao: str = Field("", max_length=300)
 
 
-VOZES = {  # vozes neurais da Azure: espanhol do Paraguai e português do Brasil
+VOZES = {  # vozes neurais da Azure: espanhol do Paraguai, português do Brasil e inglês
     "es": {"mulher": "es-PY-TaniaNeural", "homem": "es-PY-MarioNeural"},
     "pt": {"mulher": "pt-BR-FranciscaNeural", "homem": "pt-BR-AntonioNeural"},
+    "en": {"mulher": "en-US-JennyNeural", "homem": "en-US-GuyNeural"},
 }
 
 
@@ -112,7 +114,7 @@ def perguntar(p: Pergunta, request: Request):
     vip = memoria.eh_vip(p.aluno)
     if not vip and not memoria.usar(p.aluno, LIMITE_GRATIS):
         raise HTTPException(402, "Limite grátis de hoje atingido.")
-    r = tutor.responder(p.aluno, p.texto, p.nome, p.genero, p.objetivo, p.cena)
+    r = tutor.responder(p.aluno, p.texto, p.nome, p.genero, p.objetivo, p.cena, p.idioma if p.idioma in ("pt", "es", "en") else "pt")
     return {**r, "vip": vip}
 
 

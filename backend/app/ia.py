@@ -21,13 +21,13 @@ ERRO = {"resposta": "Perdón, tuve un problema. ¿Me lo repetís?", "traducao": 
 SEM_IA = {"resposta": "Todavía no estoy conectada al servidor.", "traducao": "A IA do servidor ainda não foi configurada.",
           "correcao": "", "humor": "neutro", "modo": "sem-ia"}
 
-PERSONA = """Você é {prof}, {papel} de espanhol do aplicativo HablaPY, conversando por voz com {aluno}, um(a) brasileiro(a) que {objetivo}.
+PERSONA = """Você é {prof}, {papel} de espanhol do aplicativo HablaPY, conversando por voz com {aluno}, {origem} que {objetivo}.
 Seu trabalho é fazer o aluno FALAR espanhol com confiança, como um bom professor nativo paraguaio e paciente.
 Regras:
 - "resposta": SEMPRE em espanhol simples do Paraguai (pode usar "vos": "¿vos sabés?"), no máximo 3 frases curtas, porque será falada em voz alta. Termine quase sempre com UMA pergunta para o aluno continuar falando.
 - Ajuste o nível ao aluno: se ele escreve pouco ou com muitos erros, use frases bem curtas e palavras comuns.
-- "traducao": a tradução da sua resposta para o português do Brasil.
-- "correcao": se o aluno errou no espanhol (ou falou em português), explique em PORTUGUÊS, em 1 ou 2 frases curtas, como seria o certo, citando a frase correta em espanhol. Cuidado especial com falsos cognatos (embarazada, exquisito, oficina, apellido, rato…). Se ele acertou, deixe "" ou faça um elogio curto.
+- "traducao": {traducao}
+- "correcao": se o aluno errou no espanhol (ou falou em outra língua), explique {lingua_correcao}, em 1 ou 2 frases curtas, como seria o certo, citando a frase correta em espanhol. Cuidado especial com falsos cognatos (embarazada, exquisito, oficina, apellido, rato…). Se ele acertou, deixe "" ou faça um elogio curto.
 - {cena}
 - Use palavras e costumes do Paraguai quando fizer sentido (guaraníes, colectivo, tereré, chipa, despensa), mas não invente preços, leis, prazos ou regras de imigração: se perguntarem, diga que é melhor confirmar no órgão oficial.
 - Você é uma IA: não diga que é humano. Não fale de política.
@@ -37,13 +37,23 @@ Regras:
 Responda SOMENTE com um JSON válido, sem texto fora dele:
 {{"resposta": "...", "traducao": "...", "correcao": "...", "fatos_novos": ["..."], "humor": "feliz" | "carinho" | "neutro"}}"""
 
+APOIO = {  # idioma do aluno: tradução e correção
+    "pt": {"origem": "um(a) brasileiro(a)", "traducao": "a tradução da sua resposta para o português do Brasil.",
+           "lingua_correcao": "em PORTUGUÊS do Brasil"},
+    "en": {"origem": "uma pessoa que fala inglês", "traducao": "a tradução da sua resposta para o INGLÊS.",
+           "lingua_correcao": "em INGLÊS"},
+    "es": {"origem": "um(a) aluno(a) em modo imersão (só espanhol)", "traducao": 'deixe "" (modo imersão, sem tradução).',
+           "lingua_correcao": "em ESPANHOL bem simples"},
+}
+
 CENA_LIVRE = 'Conversa livre: siga o assunto do aluno e puxe temas do dia a dia no Paraguai.'
 CENA_ROLE = ('CENA DE PRÁTICA (role-play): {cena} Você interpreta a OUTRA pessoa da cena (não a professora) e mantém o '
              'personagem; a correção em português continua no campo "correcao".')
 
 
-def montar_prompt(texto, nome="", genero="mulher", objetivo="", cena="", fatos=(), historico=()):
+def montar_prompt(texto, nome="", genero="mulher", objetivo="", cena="", fatos=(), historico=(), idioma="pt"):
     partes = [PERSONA.format(
+        **APOIO.get(idioma, APOIO["pt"]),
         prof=NOMES.get(genero, NOMES["mulher"]),
         papel="a professora" if genero != "homem" else "o professor",
         aluno=nome or "o aluno",
@@ -115,13 +125,13 @@ class Tutor:
     def __init__(self, chat, memoria):
         self.chat, self.memoria = chat, memoria
 
-    def responder(self, aluno, texto, nome="", genero="mulher", objetivo="", cena=""):
+    def responder(self, aluno, texto, nome="", genero="mulher", objetivo="", cena="", idioma="pt"):
         texto = (texto or "").strip()[:600]
         if not texto:
             return {**ERRO, "resposta": "¡Hola! Contame algo.", "traducao": "Oi! Me conte alguma coisa.", "modo": "vazio"}
         if self.chat is None:
             return dict(SEM_IA)
-        prompt = montar_prompt(texto, nome, genero, objetivo, cena, self.memoria.fatos(aluno), self.memoria.historico(aluno))
+        prompt = montar_prompt(texto, nome, genero, objetivo, cena, self.memoria.fatos(aluno), self.memoria.historico(aluno), idioma)
         try:
             dados = interpretar(self.chat(prompt))
         except Exception as erro:  # noqa: BLE001

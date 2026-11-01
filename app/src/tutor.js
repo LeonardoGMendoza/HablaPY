@@ -24,12 +24,12 @@ async function chamar(caminho, opcoes = {}) {
 }
 
 // Conversa com a professora de IA. cena = situação de prática da lição (opcional).
-export async function conversarIA({ texto, perfil, licao }) {
+export async function conversarIA({ texto, perfil, licao, idioma }) {
   try {
     return await chamar('/api/tutor', {
       corpo: {
         aluno: perfil.id, nome: perfil.nome || '', texto, genero: perfil.genero, objetivo: perfil.objetivo || '',
-        licao: licao ? licao.id : '', cena: licao ? licao.cena.pt : ''
+        licao: licao ? licao.id : '', cena: licao ? licao.cena.pt : '', idioma: idioma || 'pt'
       }
     });
   } catch (e) {

@@ -5,13 +5,14 @@ import { ESTILO, NOME_PROF } from './estilo.js';
 import { LICOES } from './conteudo/licoes.js';
 import { notaPronuncia, comentario } from './pronuncia.js';
 import { conversarIA, statusVip, assinarVip, recuperarVip, agendaAulas, planos, apiUrl } from './tutor.js';
-
-const VOZ_LANG = { es: 'es-PY', pt: 'pt-BR' };
+import { T, tx, ORDEM, VOZ_LANG } from './i18n.js';
 
 // ---------- estado (guardado no navegador) ----------
 const ler = (k, padrao) => { try { const v = localStorage.getItem(k); return v ? JSON.parse(v) : padrao; } catch (e) { return padrao; } };
 const gravar = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) {} };
 
+const doNavegador = (navigator.language || 'pt').slice(0, 2);
+let idioma = ler('hp.idioma', ORDEM.includes(doNavegador) ? doNavegador : 'pt');   // idioma do ALUNO (tela e explicações)
 let perfil = ler('hp.perfil', null);
 const novoPerfil = !perfil;
 perfil = perfil || { id: 'a' + Math.random().toString(36).slice(2, 10), genero: 'mulher', nome: '', objetivo: 'medicina', email: '' };
@@ -26,6 +27,9 @@ const chat = [];              // conversa com a IA (tela "conversa" ou aba "prat
 
 const $ = (s) => document.querySelector(s);
 const esc = (s) => String(s == null ? '' : s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+const t = () => T[idioma];
+const L = (v) => tx(v, idioma);
+const traducao = (f) => (idioma === 'es' ? '' : L(f.tr));   // em espanhol (imersão) não mostra tradução
 const liberada = (l) => l.gratis || vip.vip;
 
 // ---------- professor (avatar realista) ----------
@@ -36,19 +40,19 @@ try { professor = new Professor($('#prof')); } catch (e) { console.error(e); sta
 async function vestirProfessor() {
   if (!professor) return;
   document.documentElement.style.setProperty('--univ', ESTILO.scrub);
-  statusProf('Carregando…');
+  statusProf(t().carregando);
   try {
-    await professor.vestirE(perfil, ESTILO, (ev) => { if (ev.lengthComputable) statusProf(`Carregando… ${Math.round(ev.loaded / ev.total * 100)}%`); });
+    await professor.vestirE(perfil, ESTILO, (ev) => { if (ev.lengthComputable) statusProf(`${t().carregando} ${Math.round(ev.loaded / ev.total * 100)}%`); });
     statusProf('');
   } catch (e) { console.error(e); statusProf('⚠️'); }
 }
 
-// ---------- voz: espanhol com voz paraguaia, explicação com voz brasileira ----------
+// ---------- voz: espanhol com voz paraguaia; a explicação com a voz do idioma do aluno ----------
 function escolherVoz(lang) {
   if (!('speechSynthesis' in window)) return null;
   const vozes = speechSynthesis.getVoices(), alvo = VOZ_LANG[lang];
-  const fem = /female|mujer|mulher|paulina|luciana|francisca|helena|sabina|monica|tania|camila|maria|elena|google español|google português/i;
-  const masc = /male|hombre|homem|jorge|diego|daniel|antonio|pablo|mario|alvaro|google/i;
+  const fem = /female|mujer|mulher|paulina|luciana|francisca|helena|sabina|monica|tania|camila|maria|elena|jenny|aria|samantha|zira|google español|google português|google us english/i;
+  const masc = /male|hombre|homem|jorge|diego|daniel|antonio|pablo|mario|alvaro|guy|david|alex/i;
   const gen = perfil.genero === 'mulher' ? fem : masc;
   const doIdioma = vozes.filter(v => v.lang.replace('_', '-').toLowerCase().startsWith(lang));
   const nota = (v) => (v.lang.replace('_', '-') === alvo ? 100 : 0) + (/es-(AR|UY|PY|419|MX|US)/.test(v.lang) ? 20 : 0) + (gen.test(v.name) ? 50 : 0) + (/natural|neural|online|premium|enhanced/i.test(v.name) ? 30 : 0);
@@ -56,16 +60,22 @@ function escolherVoz(lang) {
 }
 if ('speechSynthesis' in window) speechSynthesis.getVoices();
 
+// Voz neural da nuvem: primeiro o servidor do HablaPY; se falhar, o do StudentMedical (mesmas vozes).
+// No iPhone é ela que toca ALTO depois do microfone (pelo <audio>, canal de mídia); a voz do aparelho fica baixinha.
+const VOZES_NUVEM = () => [apiUrl() + '/api/voz', 'https://studentmedical.sandlj.com.br/api/voz'];
 let nuvemFalhou = false;
 async function falarTrecho(texto, lang, id) {
   if (!texto || id !== filaFala) return false;
   if (ehIOS || !nuvemFalhou) {
     for (let tentativa = 0; tentativa < (ehIOS ? 2 : 1); tentativa++) {
-      if (id !== filaFala) return false;
-      try {
-        await professor.falarNuvem(texto, apiUrl() + '/api/voz', { texto: texto.slice(0, 600), idioma: lang, genero: perfil.genero });
-        return id === filaFala;
-      } catch (e) { console.warn('voz da nuvem', e); await new Promise(r => setTimeout(r, 500)); }
+      for (const url of VOZES_NUVEM()) {
+        if (id !== filaFala) return false;
+        try {
+          await professor.falarNuvem(texto, url, { texto: texto.slice(0, 600), idioma: lang, genero: perfil.genero });
+          return id === filaFala;
+        } catch (e) { console.warn('voz da nuvem falhou em', url, e); }
+      }
+      await new Promise(r => setTimeout(r, 500));
     }
     if (!ehIOS) { nuvemFalhou = true; setTimeout(() => { nuvemFalhou = false; }, 30000); }
   }
@@ -75,17 +85,17 @@ async function falarTrecho(texto, lang, id) {
 }
 
 let filaFala = 0;
-// fala = { es, pt } -> mostra as duas no balão e fala primeiro o espanhol, depois o português
+// fala = { es, apoio } -> mostra os dois no balão e fala primeiro o espanhol, depois o apoio no idioma do aluno
 async function falar(fala) {
   const id = ++filaFala;
   const balao = $('#balao');
   balao.hidden = false;
-  balao.innerHTML = `${fala.es ? `<b class="es">${esc(fala.es)}</b>` : ''}${fala.pt ? `<span class="pt">${esc(fala.pt)}</span>` : ''}`;
+  balao.innerHTML = `${fala.es ? `<b class="es">${esc(fala.es)}</b>` : ''}${fala.apoio ? `<span class="pt">${esc(fala.apoio)}</span>` : ''}`;
   if (!professor || !audioLiberado) return true;
   professor.parar();
   modoSom('playback');
   if (fala.es && !(await falarTrecho(fala.es, 'es', id))) return false;
-  if (fala.pt && fala.falarPt !== false && !(await falarTrecho(fala.pt, 'pt', id))) return false;
+  if (fala.apoio && !(await falarTrecho(fala.apoio, idioma, id))) return false;
   return id === filaFala;
 }
 function calar() { filaFala++; professor && professor.parar(); }
@@ -101,7 +111,7 @@ function cumprimentar() {
   liberarAudio();
   professor && professor.acenar();
   professor && professor.humor('feliz');
-  falar(boasVindas(perfil));
+  falar(boasVindas(perfil, idioma));
 }
 document.addEventListener('click', (e) => {
   if (!cumprimentou && tela !== 'config' && e.target.closest('#palco') && !e.target.closest('#mic')) setTimeout(cumprimentar, 50);
@@ -109,119 +119,124 @@ document.addEventListener('click', (e) => {
 
 // ---------- telas ----------
 function cabecalho() {
-  $('#xp').textContent = `⭐ ${progresso.pontos} pontos`;
+  document.documentElement.lang = idioma === 'pt' ? 'pt-BR' : idioma;
+  $('#lema').textContent = t().lema;
+  $('#xp').textContent = `⭐ ${progresso.pontos} ${t().pontos}`;
   const bv = $('#btnVip');
-  bv.textContent = vip.vip ? '👑 VIP' : '👑 Seja VIP';
+  bv.textContent = vip.vip ? t().vip : t().serVip;
   bv.classList.toggle('ativo', !!vip.vip);
   $('#btnTrocar').hidden = tela === 'config';
+  $('#btnTrocar').title = t().config;
+  $('#btnIdioma').textContent = idioma.toUpperCase();
+  $('#btnIdioma').setAttribute('aria-label', `${t().idioma}: ${idioma.toUpperCase()}`);
 }
 
 function telaConfig() {
+  const x = t();
   const opt = (campo, valor, rotulo) => `<button type="button" class="opt" data-campo="${campo}" data-valor="${valor}" aria-pressed="${perfil[campo] === valor}">${rotulo}</button>`;
   return `
-    <h2>Bem-vindo ao HablaPY 🇵🇾</h2>
-    <p class="aviso">Espanhol de verdade para quem vai morar ou estudar no Paraguai, com uma professora de IA que conversa com você por voz.</p>
-    <div class="campo"><label><span>Seu nome</span><input type="text" id="nome" maxlength="18" value="${esc(perfil.nome)}" autocomplete="given-name"></label></div>
-    <div class="campo"><span>Quem vai te dar aula?</span><div class="seg">${opt('genero', 'mulher', `👩‍🏫 ${NOME_PROF.mulher}`)}${opt('genero', 'homem', `👨‍🏫 ${NOME_PROF.homem}`)}</div></div>
-    <div class="campo"><span>Por que você vai para o Paraguai?</span><div class="seg">
-      ${opt('objetivo', 'medicina', '🩺 Estudar medicina')}${opt('objetivo', 'morar', '🏠 Morar / trabalhar')}${opt('objetivo', 'turismo', '🧳 Viagem')}</div></div>
-    <button type="button" class="btn prim" id="salvar">Começar →</button>`;
+    <h2>${x.bemVindo}</h2>
+    <p class="aviso">${x.apresenta}</p>
+    <div class="campo"><span>${x.idioma}</span><div class="seg">
+      ${ORDEM.map(l => `<button type="button" class="opt" data-idioma="${l}" aria-pressed="${idioma === l}">${{ pt: '🇧🇷 Português', es: '🇵🇾 Español', en: '🇺🇸 English' }[l]}</button>`).join('')}</div></div>
+    <div class="campo"><label><span>${x.seuNome}</span><input type="text" id="nome" maxlength="18" value="${esc(perfil.nome)}" autocomplete="given-name"></label></div>
+    <div class="campo"><span>${x.quemDa}</span><div class="seg">${opt('genero', 'mulher', `👩‍🏫 ${NOME_PROF.mulher}`)}${opt('genero', 'homem', `👨‍🏫 ${NOME_PROF.homem}`)}</div></div>
+    <div class="campo"><span>${x.porque}</span><div class="seg">
+      ${opt('objetivo', 'medicina', x.medicina)}${opt('objetivo', 'morar', x.morar)}${opt('objetivo', 'turismo', x.turismo)}</div></div>
+    <button type="button" class="btn prim" id="salvar">${x.comecarBtn}</button>`;
 }
 
 function cardLicao(l) {
   const feito = progresso.feitos[l.id];
   const bloqueada = !liberada(l);
+  const sub = idioma === 'es' ? l.nivel : `${esc(l.titulo.es)} · ${l.nivel}`;
   return `<button type="button" class="tema${bloqueada ? ' bloq' : ''}" data-licao="${l.id}">
-    <span class="ic" aria-hidden="true">${l.icone}</span><b>${esc(l.titulo.pt)}</b>
-    <span class="sub">${esc(l.titulo.es)} · ${l.nivel}</span>
+    <span class="ic" aria-hidden="true">${l.icone}</span><b>${esc(L(l.titulo))}</b>
+    <span class="sub">${sub}</span>
     ${bloqueada ? '<span class="cadeado">🔒 VIP</span>' : feito != null ? `<span class="feito">✓ ${feito}/${l.quiz.length}</span>` : ''}</button>`;
 }
 
+const dataBonita = (iso) => { try { return new Date(iso).toLocaleString({ pt: 'pt-BR', es: 'es-PY', en: 'en-US' }[idioma], { weekday: 'short', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }); } catch (e) { return iso; } };
+
 function telaTrilha() {
+  const x = t();
   const proxAula = aulas.find(a => a.quando && Date.parse(a.quando) > Date.now() - 3600e3);
   return `
     <div class="linha-botoes topo">
-      <button type="button" class="btn prim" id="irConversa">💬 Conversar com ${NOME_PROF[perfil.genero]}</button>
-      <button type="button" class="btn" id="irVip">${vip.vip ? '📅 Aulas ao vivo' : '👑 Aulas ao vivo (VIP)'}</button>
+      <button type="button" class="btn prim" id="irConversa">${x.conversarCom(NOME_PROF[perfil.genero])}</button>
+      <button type="button" class="btn" id="irVip">${vip.vip ? x.aulasVivo : x.aulasVivoVip}</button>
     </div>
-    ${proxAula ? `<div class="aviso">📅 Próxima aula ao vivo: <b>${esc(proxAula.titulo)}</b> — ${esc(dataBonita(proxAula.quando))}</div>` : ''}
-    <h3>Trilha: Vou para o Paraguai</h3>
+    ${proxAula ? `<div class="aviso">📅 ${x.proxima}: <b>${esc(proxAula.titulo)}</b> — ${esc(dataBonita(proxAula.quando))}</div>` : ''}
+    <h3>${x.trilha}</h3>
     <div class="temas">${LICOES.map(cardLicao).join('')}</div>`;
 }
 
 function chatHtml(vazio) {
   return `<div class="chat" id="chat">${chat.length ? chat.map(m => `<div class="msg ${m.quem}">
-      ${m.es ? `<div class="es">${esc(m.es)}</div>` : ''}${m.pt ? `<div class="pt">${esc(m.pt)}</div>` : ''}
+      ${m.es ? `<div class="es">${esc(m.es)}</div>` : ''}${m.apoio ? `<div class="pt">${esc(m.apoio)}</div>` : ''}
       ${m.correcao ? `<div class="correcao">✏️ ${esc(m.correcao)}</div>` : ''}${m.texto ? esc(m.texto) : ''}</div>`).join('') : `<p class="aviso">${vazio}</p>`}</div>
-    <form class="perg" id="formPerg"><input id="txtPerg" type="text" placeholder="Escreva em espanhol (ou toque no microfone)" autocomplete="off" required><button class="btn prim" type="submit">Enviar</button></form>`;
+    <form class="perg" id="formPerg"><input id="txtPerg" type="text" placeholder="${esc(t().placeholder)}" autocomplete="off" required><button class="btn prim" type="submit">${t().enviar}</button></form>`;
 }
 
 function telaConversa() {
-  return `<button type="button" class="btn" id="voltarTrilha">← Lições</button>
-    <h2>💬 Conversa livre</h2>
-    <p class="aviso">Fale do seu dia, da viagem, da faculdade… ${NOME_PROF[perfil.genero]} responde em espanhol, corrige seus erros em português e lembra de você na próxima vez.${vip.vip ? '' : ` Grátis: ${plano ? plano.limite_gratis : 15} mensagens por dia.`}</p>
-    ${chatHtml('Toque no microfone e diga "¡Hola!" para começar.')}`;
+  const x = t();
+  return `<button type="button" class="btn" id="voltarTrilha">${x.licoes}</button>
+    <h2>${x.conversaLivre}</h2>
+    <p class="aviso">${x.conversaAviso(NOME_PROF[perfil.genero], vip.vip ? 0 : (plano ? plano.limite_gratis : 15))}</p>
+    ${chatHtml(x.digaHola)}`;
 }
 
 function telaLicao() {
-  const l = licao;
-  const abas = [['aula', 'Aula'], ['quiz', 'Quiz'], ['praticar', 'Praticar com a IA']]
+  const x = t(), l = licao;
+  const abas = [['aula', x.aula], ['quiz', x.quiz], ['praticar', x.praticar]]
     .map(([a, n]) => `<button type="button" role="tab" data-aba="${a}" aria-selected="${aba === a}">${n}</button>`).join('');
   let corpo = '';
   if (aba === 'aula') {
-    corpo = `<p class="aviso">${esc(l.intro)}</p>
-      <p class="dica-uso">👆 Toque numa frase para ouvir. Toque em 🎤 para repetir e ganhar nota de pronúncia.</p>
+    corpo = `<p class="aviso">${esc(L(l.intro))}</p>
+      <p class="dica-uso">${x.dicaUso}</p>
       <ol class="pontos">${l.frases.map((f, i) => `<li data-i="${i}" tabindex="0">
-        <div class="es">${esc(f.es)}</div><div class="pt">${esc(f.pt)}</div>
-        ${f.dica ? `<div class="dica">💡 ${esc(f.dica)}</div>` : ''}
-        <button type="button" class="repetir" data-rep="${i}" aria-label="Repetir esta frase">🎤</button>
+        <div class="es">${esc(f.es)}</div>${traducao(f) ? `<div class="pt">${esc(traducao(f))}</div>` : ''}
+        ${f.dica ? `<div class="dica">💡 ${esc(L(f.dica))}</div>` : ''}
+        <button type="button" class="repetir" data-rep="${i}" aria-label="${esc(x.repetirFrase)}">🎤</button>
         ${progresso.pron[l.id + ':' + i] != null ? `<span class="nota">${progresso.pron[l.id + ':' + i]}%</span>` : ''}</li>`).join('')}</ol>
-      <div class="linha-botoes"><button type="button" class="btn prim" id="ouvir">🔊 Ouvir a aula</button>
-      <button type="button" class="btn" id="irQuiz">Fazer o quiz →</button></div>`;
+      <div class="linha-botoes"><button type="button" class="btn prim" id="ouvir">${x.ouvirAula}</button>
+      <button type="button" class="btn" id="irQuiz">${x.fazerQuiz}</button></div>`;
   } else if (aba === 'quiz') {
     if (quizIdx >= l.quiz.length) {
-      corpo = `<p class="pergunta">Você acertou ${quizAcertos} de ${l.quiz.length}.</p>
-        <div class="linha-botoes"><button type="button" class="btn prim" id="refazer">Refazer</button><button type="button" class="btn" data-aba="praticar">Praticar com a IA →</button></div>`;
+      corpo = `<p class="pergunta">${x.resultado(quizAcertos, l.quiz.length)}</p>
+        <div class="linha-botoes"><button type="button" class="btn prim" id="refazer">${x.refazer}</button><button type="button" class="btn" data-aba="praticar">${x.praticarIA}</button></div>`;
     } else {
       const q = l.quiz[quizIdx];
       corpo = `<div class="progresso">${quizIdx + 1} / ${l.quiz.length}</div>
-        <p class="pergunta">${esc(q.p)}</p>
-        <div class="opcoes">${q.o.map((op, i) => `<button type="button" class="opcao" data-i="${i}">${esc(op)}</button>`).join('')}</div>
+        <p class="pergunta">${esc(L(q.p))}</p>
+        <div class="opcoes">${q.o.map((op, i) => `<button type="button" class="opcao" data-i="${i}">${esc(L(op))}</button>`).join('')}</div>
         <div id="explica"></div>`;
     }
   } else {
-    corpo = `<p class="aviso">🎭 <b>Situação:</b> ${esc(l.cena.pt)}</p>${chatHtml('Toque no microfone ou escreva para responder.')}`;
+    corpo = `<p class="aviso">🎭 <b>${x.situacao}:</b> ${esc(L(l.cena))}</p>${chatHtml(x.respondaMic)}`;
   }
-  return `<button type="button" class="btn" id="voltarTrilha">← Lições</button>
-    <h2>${l.icone} ${esc(l.titulo.pt)}</h2><div class="abas" role="tablist">${abas}</div>${corpo}`;
+  return `<button type="button" class="btn" id="voltarTrilha">${x.licoes}</button>
+    <h2>${l.icone} ${esc(L(l.titulo))}</h2><div class="abas" role="tablist">${abas}</div>${corpo}`;
 }
 
-const dataBonita = (iso) => { try { return new Date(iso).toLocaleString('pt-BR', { weekday: 'short', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }); } catch (e) { return iso; } };
-
 function telaVip() {
-  const preco = plano ? `R$ ${Number(plano.preco).toFixed(2).replace('.', ',')}/mês` : '';
+  const x = t();
+  const preco = plano ? `R$ ${Number(plano.preco).toFixed(2).replace('.', ',')}${x.porMes}` : '';
   const lista = aulas.length ? `<ul class="aulas">${aulas.map(a => `<li><b>${esc(a.titulo)}</b><span>${esc(dataBonita(a.quando))}${a.descricao ? ' · ' + esc(a.descricao) : ''}</span>
-      ${a.link ? `<a class="btn prim mini" href="${esc(a.link)}" target="_blank" rel="noopener">Entrar na aula</a>` : '<span class="cadeado">🔒 só VIP</span>'}</li>`).join('')}</ul>`
-    : '<p class="aviso">Nenhuma aula ao vivo marcada ainda. Assim que o professor marcar, ela aparece aqui.</p>';
+      ${a.link ? `<a class="btn prim mini" href="${esc(a.link)}" target="_blank" rel="noopener">${x.entrarAula}</a>` : `<span class="cadeado">${x.soVip}</span>`}</li>`).join('')}</ul>`
+    : `<p class="aviso">${x.semAulas}</p>`;
   if (vip.vip) {
-    return `<button type="button" class="btn" id="voltarTrilha">← Lições</button>
-      <h2>👑 Você é VIP</h2>
-      <p class="aviso">Todas as lições liberadas, conversa sem limite com a IA e aulas ao vivo com o professor.</p>
-      <h3>Aulas ao vivo</h3>${lista}`;
+    return `<button type="button" class="btn" id="voltarTrilha">${x.licoes}</button>
+      <h2>${x.vipVoce}</h2><p class="aviso">${x.vipTudo}</p><h3>${x.proximasAulas}</h3>${lista}`;
   }
-  return `<button type="button" class="btn" id="voltarTrilha">← Lições</button>
-    <h2>👑 HablaPY VIP ${preco ? `<small class="preco">${preco}</small>` : ''}</h2>
-    <ul class="beneficios">
-      <li>🎥 Aulas ao vivo com professor nativo (espanhol e guarani do Paraguai)</li>
-      <li>📚 Todas as lições: documentos, faculdade, farmácia, espanhol médico e guarani</li>
-      <li>💬 Conversa ilimitada com a professora de IA</li>
-      <li>❌ Cancele quando quiser pelo Mercado Pago</li>
-    </ul>
-    <div class="campo"><label><span>Seu e-mail (o mesmo do Mercado Pago)</span><input type="email" id="email" value="${esc(perfil.email || '')}" autocomplete="email" placeholder="voce@email.com"></label></div>
-    <div class="linha-botoes"><button type="button" class="btn prim" id="assinar">Assinar com Pix ou cartão</button>
-    <button type="button" class="btn" id="jaSou">Já sou VIP neste e-mail</button></div>
-    <p class="msg-vip" id="msgVip" aria-live="polite"></p>
-    <h3>Próximas aulas ao vivo</h3>${lista}`;
+  return `<button type="button" class="btn" id="voltarTrilha">${x.licoes}</button>
+    <h2>${x.vipTitulo} ${preco ? `<small class="preco">${preco}</small>` : ''}</h2>
+    <ul class="beneficios">${x.beneficios.map(b => `<li>${b}</li>`).join('')}</ul>
+    <div class="campo"><label><span>${x.seuEmail}</span><input type="email" id="email" value="${esc(perfil.email || '')}" autocomplete="email" placeholder="voce@email.com"></label></div>
+    <div class="linha-botoes"><button type="button" class="btn prim" id="assinar">${x.assinar}</button>
+    <button type="button" class="btn" id="jaSou">${x.jaSou}</button></div>
+    <p class="msg-vip" id="msgVip" aria-live="polite">${plano && !plano.pagamento_ativo ? x.pagamentoOff : ''}</p>
+    <h3>${x.proximasAulas}</h3>${lista}`;
 }
 
 function render() {
@@ -232,21 +247,30 @@ function render() {
   const c = $('#chat'); if (c && c.lastElementChild) c.lastElementChild.scrollIntoView({ block: 'nearest' });
 }
 
+function trocarIdioma(novo) {
+  calar();
+  idioma = novo;
+  gravar('hp.idioma', idioma);
+  render();
+  estadoMic($('#mic').dataset.estado);
+  if (cumprimentou && tela !== 'config') falar(boasVindas(perfil, idioma));
+}
+
 // ---------- aula ----------
 async function ouvirFrase(i) {
   const f = licao.frases[i];
   document.querySelectorAll('.pontos li').forEach(li => li.classList.toggle('atual', +li.dataset.i === i));
   const li = document.querySelector(`.pontos li[data-i="${i}"]`); if (li) li.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
-  return falar({ es: f.es, pt: f.pt });
+  return falar({ es: f.es, apoio: traducao(f) });
 }
 
 function abrirLicao(id) {
   const l = LICOES.find(x => x.id === id);
-  if (!liberada(l)) { abrirVip(); falar({ es: '¡Esta lección es VIP!', pt: 'Assine o VIP para liberar esta lição e as aulas ao vivo.', falarPt: true }); return; }
+  if (!liberada(l)) { abrirVip(); falar({ es: '¡Esta lección es VIP!', apoio: t().licaoVip }); return; }
   licao = l; registrarLicao(id);
   tela = 'licao'; aba = 'aula'; quizIdx = 0; quizAcertos = 0; repetindo = -1; chat.length = 0;
   render();
-  falar({ es: `Vamos con: ${l.titulo.es}.`, pt: l.intro });
+  falar({ es: `${t().vamosCom} ${l.titulo.es}.`, apoio: L(l.intro) });
 }
 
 async function abrirVip() {
@@ -262,29 +286,28 @@ async function abrirVip() {
 async function mandarParaIA(texto) {
   chat.push({ quem: 'eu', texto });
   render();
-  const rapida = !apiUrl() ? respostaRapida(texto, perfil) : null;
-  if (rapida) { chat.push({ quem: 'ia', ...rapida }); render(); return falar(rapida); }
   estadoMic('pensando');
-  const r = await conversarIA({ texto, perfil, licao: aba === 'praticar' ? licao : null });
+  const r = await conversarIA({ texto, perfil, licao: aba === 'praticar' ? licao : null, idioma });
   estadoMic('pronto');
   if (r.limite) {
-    const fala = { es: '¡Llegaste al límite de hoy!', pt: 'As mensagens grátis de hoje acabaram. Volte amanhã ou assine o VIP para conversar sem limite.' };
+    const fala = { es: '¡Llegaste al límite de hoy!', apoio: t().limite };
     chat.push({ quem: 'ia', ...fala }); render(); return falar(fala);
   }
   if (!r.resposta) {
-    const local = respostaRapida(texto, perfil) || { es: 'Perdón, no te escuché bien.', pt: 'Estou sem conexão com o servidor agora. Tente de novo em instantes.' };
+    const local = respostaRapida(texto, perfil, idioma) || { es: 'Perdón, no te escuché bien.', apoio: t().semServidor };
     chat.push({ quem: 'ia', ...local }); render(); return falar(local);
   }
   if (r.vip !== undefined && r.vip !== vip.vip) { vip.vip = r.vip; gravar('hp.vip', vip); }
-  chat.push({ quem: 'ia', es: r.resposta, pt: r.traducao, correcao: r.correcao });
+  chat.push({ quem: 'ia', es: r.resposta, apoio: idioma === 'es' ? '' : r.traducao, correcao: r.correcao });
   render();
   professor && professor.humor(r.humor || 'neutro');
-  // fala a resposta em espanhol e, se houver, a correção em português
-  return falar({ es: r.resposta, pt: r.correcao || '' });
+  // fala a resposta em espanhol e, se houver, a correção no idioma do aluno
+  return falar({ es: r.resposta, apoio: r.correcao || '' });
 }
 
 // ---------- eventos ----------
 function ligar() {
+  document.querySelectorAll('[data-idioma]').forEach(b => b.onclick = () => trocarIdioma(b.dataset.idioma));
   document.querySelectorAll('[data-campo]').forEach(b => b.onclick = async () => {
     perfil[b.dataset.campo] = b.dataset.valor; render();
     if (b.dataset.campo === 'genero') await vestirProfessor();
@@ -309,7 +332,7 @@ function ligar() {
     if (aba === 'praticar') chat.length = 0;
     render();
     if (aba === 'quiz') lerPergunta();
-    if (aba === 'praticar') { chat.push({ quem: 'ia', es: licao.cena.inicio }); render(); falar({ es: licao.cena.inicio, pt: 'Responda em espanhol, pelo microfone ou escrevendo.' }); }
+    if (aba === 'praticar') { chat.push({ quem: 'ia', es: licao.cena.inicio }); render(); falar({ es: licao.cena.inicio, apoio: t().respondaEs }); }
   });
   document.querySelectorAll('.pontos li').forEach(li => {
     li.onclick = (e) => { if (e.target.closest('.repetir')) return; calar(); repetindo = -1; ouvirFrase(+li.dataset.i); };
@@ -319,21 +342,21 @@ function ligar() {
     e.stopPropagation(); liberarAudio(); calar();
     repetindo = +b.dataset.rep;
     document.querySelectorAll('.pontos li').forEach(li => li.classList.toggle('atual', +li.dataset.i === repetindo));
-    await falar({ es: licao.frases[repetindo].es, pt: 'Agora repita depois do sinal.', falarPt: true });
+    await falar({ es: licao.frases[repetindo].es, apoio: t().repitaSinal });
     ouvir();
   });
 
   const ouvirBtn = $('#ouvir');
   if (ouvirBtn) ouvirBtn.onclick = async () => {
-    if (ouvirBtn.dataset.tocando) { calar(); delete ouvirBtn.dataset.tocando; ouvirBtn.textContent = '🔊 Ouvir a aula'; return; }
-    ouvirBtn.dataset.tocando = '1'; ouvirBtn.textContent = '⏹ Parar';
+    if (ouvirBtn.dataset.tocando) { calar(); delete ouvirBtn.dataset.tocando; ouvirBtn.textContent = t().ouvirAula; return; }
+    ouvirBtn.dataset.tocando = '1'; ouvirBtn.textContent = t().parar;
     for (let i = 0; i < licao.frases.length; i++) {
       const continua = await ouvirFrase(i);
       if (continua === false || !ouvirBtn.dataset.tocando) break;
     }
     document.querySelectorAll('.pontos li').forEach(li => li.classList.remove('atual'));
     professor && professor.gesto('thumbup', 2);
-    delete ouvirBtn.dataset.tocando; ouvirBtn.textContent = '🔊 Ouvir a aula';
+    delete ouvirBtn.dataset.tocando; ouvirBtn.textContent = t().ouvirAula;
   };
   const irQuiz = $('#irQuiz'); if (irQuiz) irQuiz.onclick = () => { calar(); aba = 'quiz'; quizIdx = 0; quizAcertos = 0; respondida = false; render(); lerPergunta(); };
   const refazer = $('#refazer'); if (refazer) refazer.onclick = () => { quizIdx = 0; quizAcertos = 0; respondida = false; render(); lerPergunta(); };
@@ -346,17 +369,17 @@ function ligar() {
     if (!ok) b.classList.add('errada');
     if (ok) { quizAcertos++; progresso.pontos += 10; professor && professor.humor('feliz'); professor && professor.gesto('thumbup', 2); }
     else { professor && professor.humor('carinho'); }
-    $('#explica').innerHTML = `<div class="explica">${ok ? '¡Correcto! ' : 'Casi. '}${esc(q.e)}</div><div class="linha-botoes"><button type="button" class="btn prim" id="proxima">Próxima →</button></div>`;
+    $('#explica').innerHTML = `<div class="explica">${ok ? t().certo : t().quase}${esc(L(q.e))}</div><div class="linha-botoes"><button type="button" class="btn prim" id="proxima">${t().proximaQ}</button></div>`;
     $('#proxima').onclick = () => {
       quizIdx++; respondida = false; professor && professor.humor('neutro');
       if (quizIdx >= licao.quiz.length) {
         progresso.feitos[licao.id] = Math.max(progresso.feitos[licao.id] || 0, quizAcertos);
         gravar('hp.progresso', progresso);
-        render(); falar({ es: quizAcertos === licao.quiz.length ? '¡Perfecto!' : '¡Bien hecho!', pt: `Você acertou ${quizAcertos} de ${licao.quiz.length}.` });
+        render(); falar({ es: quizAcertos === licao.quiz.length ? '¡Perfecto!' : '¡Bien hecho!', apoio: t().voceAcertou(quizAcertos, licao.quiz.length) });
       } else { render(); lerPergunta(); }
     };
     cabecalho(); gravar('hp.progresso', progresso);
-    falar({ es: ok ? '¡Correcto!' : 'Casi.', pt: q.e });
+    falar({ es: ok ? '¡Correcto!' : 'Casi.', apoio: L(q.e) });
   });
 
   const form = $('#formPerg');
@@ -367,39 +390,42 @@ function ligar() {
   };
 
   const email = $('#email'); if (email) email.oninput = () => { perfil.email = email.value.trim(); gravar('hp.perfil', perfil); };
-  const msg = (t) => { const m = $('#msgVip'); if (m) m.textContent = t; };
+  const msg = (txt) => { const m = $('#msgVip'); if (m) m.textContent = txt; };
   const emailOk = () => /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(perfil.email || '');
   const assinar = $('#assinar');
   if (assinar) assinar.onclick = async () => {
-    if (!emailOk()) return msg('Digite um e-mail válido.');
-    assinar.disabled = true; msg('Abrindo o Mercado Pago…');
+    if (plano && !plano.pagamento_ativo) return msg(t().pagamentoOff);
+    if (!emailOk()) return msg(t().emailInvalido);
+    assinar.disabled = true; msg(t().abrindoMP);
     try { const r = await assinarVip(perfil, perfil.email); location.href = r.url; }
-    catch (e) { msg('Não consegui abrir o pagamento agora: ' + e.message); assinar.disabled = false; }
+    catch (e) { msg(e.status === 503 ? t().pagamentoOff : t().erroPagamento + e.message); assinar.disabled = false; }
   };
   const jaSou = $('#jaSou');
   if (jaSou) jaSou.onclick = async () => {
-    if (!emailOk()) return msg('Digite o e-mail que você usou na assinatura.');
+    if (!emailOk()) return msg(t().emailAssinatura);
     try {
       const r = await recuperarVip(perfil, perfil.email);
       vip = r; gravar('hp.vip', vip);
-      if (r.vip) { msg('VIP liberado neste aparelho! 🎉'); abrirVip(); } else msg('Não encontrei assinatura ativa nesse e-mail.');
+      if (r.vip) { msg(t().vipLiberado); abrirVip(); } else msg(t().semAssinatura);
     } catch (e) { msg(e.message); }
   };
 }
 
 function lerPergunta() {
-  if (licao && quizIdx < licao.quiz.length) falar({ es: '', pt: licao.quiz[quizIdx].p });
+  if (licao && quizIdx < licao.quiz.length) falar({ es: '', apoio: L(licao.quiz[quizIdx].p) });
 }
 
 $('#btnTrocar').onclick = () => { calar(); tela = 'config'; render(); };
 $('#btnVip').onclick = () => { liberarAudio(); calar(); abrirVip(); };
+$('#btnIdioma').onclick = () => { liberarAudio(); trocarIdioma(ORDEM[(ORDEM.indexOf(idioma) + 1) % ORDEM.length]); };
 
 // ---------- microfone ----------
 const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
 let rec = null, ouvindo = false, ouvido = '';
 function estadoMic(e) {
   $('#mic').dataset.estado = e;
-  $('#dicaVoz').textContent = e === 'ouvindo' ? (repetindo >= 0 ? 'Repita agora…' : 'Te escucho…') : e === 'pensando' ? 'Pensando…' : (cumprimentou ? 'Toque e fale' : 'Toque para começar');
+  $('#mic').setAttribute('aria-label', t().falar);
+  $('#dicaVoz').textContent = e === 'ouvindo' ? (repetindo >= 0 ? t().repita : t().ouvindo) : e === 'pensando' ? t().pensando : (cumprimentou ? t().falar : t().comecar);
 }
 
 async function voceDisse(texto) {
@@ -417,7 +443,7 @@ async function voceDisse(texto) {
     professor && professor.humor(c.humor);
     if (nota >= 90) professor && professor.gesto('thumbup', 2);
     render();
-    return falar({ es: `${c.es}`, pt: `Nota ${nota}. Eu entendi: "${texto}".${faltando.length && nota < 90 ? ' Treine: ' + faltando.slice(0, 3).join(', ') + '.' : ''}` });
+    return falar({ es: c.es, apoio: `${t().nota(nota, texto)}${faltando.length && nota < 90 ? ' ' + t().treine + ' ' + faltando.slice(0, 3).join(', ') + '.' : ''}` });
   }
   if (tela === 'licao' && aba !== 'praticar') { aba = 'praticar'; chat.length = 0; }
   if (tela !== 'licao' && tela !== 'conversa') { tela = 'conversa'; chat.length = 0; }
@@ -425,9 +451,9 @@ async function voceDisse(texto) {
 }
 
 function ouvir() {
-  if (!rec) { $('#balao').hidden = false; $('#balao').textContent = 'Este navegador não ouve a voz. Use o Chrome ou o Safari.'; return; }
+  if (!rec) { $('#balao').hidden = false; $('#balao').textContent = t().semMic; return; }
   try { modoSom('play-and-record'); rec.lang = 'es-PY'; ouvido = ''; rec.start(); ouvindo = true; estadoMic('ouvindo'); }
-  catch (er) { $('#dicaVoz').textContent = 'Não entendi. Toque e fale de novo.'; }
+  catch (er) { $('#dicaVoz').textContent = t().naoEntendi; }
 }
 
 if (SR) {
@@ -439,7 +465,7 @@ if (SR) {
     $('#balao').hidden = false; $('#balao').textContent = '🎤 ' + txt;
     if (final) { ouvindo = false; try { rec.abort(); } catch (er) {} modoSom('playback'); const fala = ouvido; ouvido = ''; voceDisse(fala); }
   };
-  rec.onerror = (e) => { modoSom('playback'); ouvindo = false; ouvido = ''; estadoMic('pronto'); if (e.error === 'not-allowed') $('#dicaVoz').textContent = 'Libere o microfone no cadeado da barra de endereço.'; };
+  rec.onerror = (e) => { modoSom('playback'); ouvindo = false; ouvido = ''; estadoMic('pronto'); if (e.error === 'not-allowed') $('#dicaVoz').textContent = t().micBloqueado; };
   rec.onend = () => { modoSom('playback'); if (!ouvindo) return; ouvindo = false; if (ouvido) { const f = ouvido; ouvido = ''; voceDisse(f); } else { repetindo = -1; estadoMic('pronto'); } };
 }
 $('#mic').onclick = (e) => {
@@ -457,7 +483,7 @@ render();
 estadoMic('pronto');
 vestirProfessor();
 registrarVisita();
-if (!novoPerfil) { const b = boasVindas(perfil); $('#balao').hidden = false; $('#balao').innerHTML = `<b class="es">${esc(b.es)}</b><span class="pt">${esc(b.pt)}</span>`; }
+if (!novoPerfil) { const b = boasVindas(perfil, idioma); $('#balao').hidden = false; $('#balao').innerHTML = `<b class="es">${esc(b.es)}</b><span class="pt">${esc(b.apoio)}</span>`; }
 // volta do Mercado Pago: confere o VIP
 const voltouPagamento = /[?&](vip|status|preapproval_id)=/.test(location.search);
 Promise.all([planos(), statusVip(perfil), agendaAulas(perfil)]).then(([p, s, a]) => {
@@ -465,5 +491,5 @@ Promise.all([planos(), statusVip(perfil), agendaAulas(perfil)]).then(([p, s, a])
   if (s && !s.offline) { vip = s; gravar('hp.vip', vip); }
   aulas = (a && a.aulas) || [];
   if (voltouPagamento) { abrirVip(); history.replaceState(null, '', location.pathname); }
-  else if (tela === 'trilha') render();
+  else if (tela === 'trilha' || tela === 'vip') render();
 });

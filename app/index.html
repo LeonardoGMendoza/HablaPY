@@ -29,6 +29,7 @@ header{display:flex;align-items:center;gap:10px;padding:10px 16px;background:var
 .xp{font-weight:700;font-size:14px;background:rgba(255,255,255,.1);padding:7px 12px;border-radius:999px;white-space:nowrap}
 .btn-vip{border:0;border-radius:999px;padding:7px 14px;font-weight:800;background:var(--ouro);color:#1b1300;min-height:36px}
 .btn-vip.ativo{background:rgba(255,255,255,.12);color:#ffd77a}
+.btn-idioma{border:1px solid rgba(255,255,255,.35);background:rgba(255,255,255,.1);color:#fff;border-radius:999px;padding:6px 12px;font-weight:800;min-height:36px;min-width:48px}
 .btn-sair{border:1px solid rgba(255,255,255,.3);background:transparent;color:#fff;border-radius:999px;padding:6px 12px;font-weight:700;min-height:36px}
 
 main{display:grid;grid-template-columns:minmax(320px,46%) 1fr;height:calc(100vh - 56px);height:calc(100dvh - 56px)}
@@ -135,10 +136,11 @@ form.perg input{flex:1;font:inherit;border:1px solid var(--line);border-radius:1
 <header>
   <div class="marca">
     <div class="logo" aria-hidden="true">🗣️</div>
-    <div>HablaPY<small>Espanhol para viver no Paraguai</small></div>
+    <div>HablaPY<small id="lema">Espanhol para viver no Paraguai</small></div>
   </div>
   <div class="espaco"></div>
   <div class="xp" id="xp"></div>
+  <button type="button" class="btn-idioma" id="btnIdioma" aria-label="Idioma">PT</button>
   <button type="button" class="btn-vip" id="btnVip">👑 VIP</button>
   <button type="button" class="btn-sair" id="btnTrocar" title="Mudar nome ou professor(a)">⚙️</button>
 </header>

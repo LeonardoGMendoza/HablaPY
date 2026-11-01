@@ -1,0 +1,10 @@
+# Segredos
+.env
+backend/.env
+# Dados dos alunos (banco, aulas)
+backend/data/
+*.db
+# Python / Node
+__pycache__/
+.venv/
+node_modules/

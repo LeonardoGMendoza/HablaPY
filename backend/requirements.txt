@@ -1,0 +1,6 @@
+fastapi==0.143.0
+uvicorn==0.54.0
+pydantic==2.14.0
+# IA e voz da Oracle Cloud - a mesma conta do VinaCare/StudentMedical
+oci>=2.150,<3
+# so para os testes: pip install httpx
